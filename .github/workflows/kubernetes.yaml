@@ -1,6 +1,13 @@
 name: Validate Kubernetes Manifests
 
 on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'apps/**'
+      - 'environments/**'
+      - 'policies/**'
+      - '.github/workflows/kubernetes.yml'
   push:
     branches: [ main ]
     paths:
@@ -82,3 +89,15 @@ jobs:
             rm -f rendered.yaml
           done <<< "$OVERLAYS"
           exit $fail
+
+  comment:
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post status
+        run: |
+          if [ "${{ needs.validate.result }}" != "success" ]; then
+            echo "Validation failed. Please check the workflow logs for details."
+            exit 1
+          fi
