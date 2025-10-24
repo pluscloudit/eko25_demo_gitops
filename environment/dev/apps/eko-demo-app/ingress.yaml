@@ -8,7 +8,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: demo.pluscloudit.pe
+    - host: demo.pluscloudit.pee
       http:
         paths:
           - path: /eko-demo-app
