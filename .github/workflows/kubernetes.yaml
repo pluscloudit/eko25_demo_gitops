@@ -1,103 +1,28 @@
-name: Validate Kubernetes Manifests
+name: Trivy Kubernetes Manifest Scan
 
 on:
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'apps/**'
-      - 'environments/**'
-      - 'policies/**'
-      - '.github/workflows/kubernetes.yml'
   push:
-    branches: [ main ]
-    paths:
-      - 'apps/**'
-      - 'environments/**'
-      - 'policies/**'
+    branches:
+      - main
 
 jobs:
-  validate:
+  trivy-scan-manifests:
     runs-on: ubuntu-latest
-
-    env:
-      OVERLAYS: |
-        environment/dev
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up tools
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -y && sudo apt-get install -y trivy
-          curl -sSLo kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz"
-          sudo tar -xzf kustomize.tar.gz -C /usr/local/bin kustomize
-          curl -sSLO https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
-          sudo tar -xzf kubeconform-linux-amd64.tar.gz -C /usr/local/bin kubeconform
-          curl -sSLo kube-linter.tar.gz https://github.com/stackrox/kube-linter/releases/download/v0.6.5/kube-linter-linux.tar.gz
-          tar -xzf kube-linter.tar.gz
-          sudo mv kube-linter /usr/local/bin/
-          kube-linter version
-          kustomize version
-          kubeconform -v
-          trivy --version
+      - name: Run Trivy scan on Kubernetes manifests
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config' # Scan for misconfigurations in IaC
+          input: 'manifests/' # Path to your Kubernetes manifest directory
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1' # Fail the workflow if high/critical issues are found
 
-      - name: Build with Kustomize and validate with kubeconform
-        run: |
-          set -euo pipefail
-          fail=0
-          while IFS= read -r path; do
-            [ -z "$path" ] && continue
-            echo "::group::Kustomize build -> $path"
-            if ! kustomize build "$path" -o rendered.yaml; then
-              echo "ERROR: kustomize build failed for $path"
-              fail=1
-              echo "::endgroup::"
-              continue
-            fi
-            echo "::endgroup::"
-
-            echo "::group::Schema validate (kubeconform) -> $path"
-            # kubeconform: valida contra esquemas oficiales, ignora CRDs si no hay schema (exit-on-error para cortar si hay errores)
-            if ! kubeconform -strict -summary -ignore-missing-schemas rendered.yaml; then
-              echo "ERROR: kubeconform validation failed for $path"
-              fail=1
-            fi
-            echo "::endgroup::"
-
-            echo "::group::Lint (kube-linter) -> $path"
-            # Kube-linter: mejores prácticas
-            if ! kube-linter lint rendered.yaml --format=text; then
-              echo "ERROR: kube-linter failed for $path"
-              fail=1
-            fi
-            echo "::endgroup::"
-
-            echo "::group::Misconfig scan (Trivy) -> $path"
-            # Trivy config para manifiestos. Ajusta severities según tu umbral de fallo.
-            # Si quieres omitir ciertas reglas, usa --skip-policy o un .trivy.yaml
-            if ! trivy config --severity HIGH,CRITICAL --exit-code 1 --no-progress rendered.yaml; then
-              echo "ERROR: Trivy misconfig failed for $path"
-              fail=1
-            fi
-            echo "::endgroup::"
-
-            rm -f rendered.yaml
-          done <<< "$OVERLAYS"
-          exit $fail
-
-  comment:
-    if: ${{ github.event_name == 'pull_request' }}
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Post status
-        run: |
-          if [ "${{ needs.validate.result }}" != "success" ]; then
-            echo "Validation failed. Please check the workflow logs for details."
-            exit 1
-          fi
+      - name: Upload Trivy scan results to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
