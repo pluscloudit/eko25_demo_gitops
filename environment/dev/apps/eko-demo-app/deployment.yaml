@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eko-demo-app
+  labels:
+    app: eko-demo-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: eko-demo-app
+  template:
+    metadata:
+      labels:
+        app: eko-demo-app
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
